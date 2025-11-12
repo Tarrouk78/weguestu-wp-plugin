@@ -1,0 +1,7 @@
+.wegestu-jobs-list { display: grid; gap: 16px; }
+.wegestu-job-item { border: 1px solid #eee; padding: 12px; border-radius: 6px; }
+.wegestu-job-title { margin: 0 0 6px; }
+.wegestu-job-company, .wegestu-job-location { font-size: 0.9em; color: #666; }
+.wegestu-job-apply a { display:inline-block; margin-top:8px; padding:8px 12px; border-radius:4px; background:#0073aa; color:#fff; text-decoration:none; }
+.wegestu-jobs-pagination { text-align:center; margin-top:12px; }
+.wegestu-load-more { padding:8px 16px; cursor:pointer; }
