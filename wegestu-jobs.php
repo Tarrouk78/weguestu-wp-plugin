@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Wegestu Jobs Connector
  * Description: Connecte WordPress à l'API Wegestu pour afficher les offres d'emploi et les entreprises. Shortcodes: [wegestu_jobs], [wegestu_job id="..."]
- * Version: 1.0.2
+ * Version: 1.0.4
  * Author: Wegestu
  * Text Domain: wegestu-jobs
  */
@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'WEGESTU_JOBS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WEGESTU_JOBS_URL', plugin_dir_url( __FILE__ ) );
-define( 'WEGESTU_JOBS_VERSION', '1.0.2' );
+define( 'WEGESTU_JOBS_VERSION', '1.0.4' );
 
 // Includes
 require_once WEGESTU_JOBS_DIR . 'inc/class-wegestu-api.php';
@@ -24,115 +24,63 @@ if ( did_action( 'elementor/loaded' ) ) {
     Wegestu_Elementor_Loader::init();
 }
 
-/**
- * Enqueue assets
- */
-function wegestu_jobs_enqueue_assets() {
+// Enqueue assets
+add_action( 'wp_enqueue_scripts', function() {
     wp_enqueue_style( 'wegestu-jobs-css', WEGESTU_JOBS_URL . 'assets/css/wegestu-jobs.css', [], WEGESTU_JOBS_VERSION );
     wp_enqueue_script( 'wegestu-jobs-js', WEGESTU_JOBS_URL . 'assets/js/wegestu-jobs.js', ['jquery'], WEGESTU_JOBS_VERSION, true );
-
     wp_localize_script( 'wegestu-jobs-js', 'WegestuJobs', [
         'ajax_url' => admin_url( 'admin-ajax.php' ),
         'nonce'    => wp_create_nonce( 'wegestu_jobs_nonce' ),
     ]);
-}
-add_action( 'wp_enqueue_scripts', 'wegestu_jobs_enqueue_assets' );
+});
 
-/**
- * Shortcodes
- */
+// Shortcodes
 add_shortcode( 'wegestu_jobs', 'wegestu_jobs_list_shortcode' );
 add_shortcode( 'wegestu_job', 'wegestu_job_detail_shortcode' );
 
 function wegestu_jobs_list_shortcode( $atts ) {
-    $atts = shortcode_atts([
-        'per_page' => 5,
-        'page'     => 1,
-    ], $atts, 'wegestu_jobs');
-
+    $atts = shortcode_atts([ 'per_page'=>5, 'page'=>1 ], $atts, 'wegestu_jobs');
     $api = new Wegestu_API();
-    $response = $api->get_jobs( intval($atts['per_page']), intval($atts['page']) );
-
-    return wegestu_jobs_render_list( $response );
+    $response = $api->get_jobs(intval($atts['per_page']), intval($atts['page']));
+    return wegestu_jobs_render_list($response);
 }
 
 function wegestu_job_detail_shortcode( $atts ) {
-    $atts = shortcode_atts([ 'id' => 0 ], $atts, 'wegestu_job');
-
+    $atts = shortcode_atts([ 'id'=>0 ], $atts, 'wegestu_job');
     $id = intval($atts['id']) ?: get_query_var('job_id');
-
-    if ( ! $id ) {
-        return '<p>' . esc_html__('Identifiant d\'offre invalide', 'wegestu-jobs') . '</p>';
-    }
-
+    if (!$id) return '<p>'.esc_html__('Identifiant d\'offre invalide','wegestu-jobs').'</p>';
     $api = new Wegestu_API();
-    $job = $api->get_job_by_id( $id );
-
-    // Debug API
-    // echo '<pre>'; print_r($job); echo '</pre>'; exit;
-
-    return wegestu_jobs_render_detail( $job );
+    $job = $api->get_job_by_id($id);
+    return wegestu_jobs_render_detail($job);
 }
 
-/**
- * AJAX "Load More"
- */
-add_action( 'wp_ajax_wegestu_load_more', 'wegestu_jobs_ajax_load_more' );
-add_action( 'wp_ajax_nopriv_wegestu_load_more', 'wegestu_jobs_ajax_load_more' );
+// Activation hook : options par défaut + flush rewrite
+register_activation_hook( __FILE__, function() {
 
-function wegestu_jobs_ajax_load_more() {
-    check_ajax_referer( 'wegestu_jobs_nonce', 'nonce' );
-
-    $page = isset($_POST['page']) ? intval($_POST['page']) : 1;
-    $per_page = isset($_POST['per_page']) ? intval($_POST['per_page']) : 5;
-
-    $api = new Wegestu_API();
-    $response = $api->get_jobs( $per_page, $page );
-
-    $html = wegestu_jobs_render_list_items( $response );
-
-    wp_send_json_success([ 'html' => $html ]);
-}
-
-/**
- * Activation hook
- */
-register_activation_hook( __FILE__, 'wegestu_jobs_activate' );
-
-function wegestu_jobs_activate() {
     $defaults = [
-        'base_url' => 'https://talents.test.wegestu.com/',
-        'token'    => '',
-        'per_page_default' => 5,
+        'wegestu_api_url'   => 'https://talents.test.wegestu.com/',
+        'wegestu_api_token' => '',
+        'wegestu_per_page'  => 5,
     ];
 
-    foreach( $defaults as $k => $v ) {
-        if ( get_option('wegestu_jobs_' . $k) === false ) {
-            update_option('wegestu_jobs_' . $k, $v);
+    foreach( $defaults as $key => $value ) {
+        if ( get_option($key) === false ) {
+            update_option($key, $value);
         }
     }
 
-    wegestu_add_rewrite_rules();
+    // Rewrite rules pour /offres/ID
+    add_rewrite_rule('^offres/([0-9]+)/?$', 'index.php?pagename=offres&job_id=$matches[1]', 'top');
     flush_rewrite_rules();
-}
+});
 
-/**
- * Rewrite rules pour les détails
- */
-function wegestu_add_rewrite_rules() {
-    add_rewrite_rule(
-        '^offres/([0-9]+)/?$',
-        'index.php?pagename=offres&job_id=$matches[1]',
-        'top'
-    );
-}
-add_action('init', 'wegestu_add_rewrite_rules');
+// Init rewrite rules
+add_action('init', function() {
+    add_rewrite_rule('^offres/([0-9]+)/?$', 'index.php?pagename=offres&job_id=$matches[1]', 'top');
+});
 
-/**
- * Query var
- */
-add_filter('query_vars', 'wegestu_add_query_vars');
-function wegestu_add_query_vars($vars) {
-    $vars[] = 'job_id';
-    return $vars;
-}
+// Query var pour job_id
+add_filter('query_vars', function($vars){ 
+    $vars[] = 'job_id'; 
+    return $vars; 
+});

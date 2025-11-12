@@ -1,78 +1,91 @@
 <?php
-if ( ! defined('ABSPATH') ) exit;
+if ( ! defined( 'ABSPATH' ) ) exit;
 
-class Wegestu_API {
-
-    private $base_url;
-    private $token;
-    private $transient_ttl = 300; // 5 min
-
-    public function __construct() {
-        $this->base_url = trailingslashit(get_option('wegestu_jobs_base_url', 'https://api.test.wegestu.com/'));
-        $this->token = get_option('wegestu_jobs_token', '');
+function wegestu_jobs_render_list($response) {
+    if (isset($response['error'])) {
+        return '<div class="wegestu-jobs-error">'.esc_html($response['error']).'</div>';
     }
 
-    public function get_jobs($per_page=5, $page=1) {
-        $cache_key = "wegestu_jobs_list_{$per_page}_{$page}";
-        $cached = get_transient($cache_key);
-        if ($cached !== false) return $cached;
+    $items = $response['data']['data'] ?? $response['data'] ?? $response;
 
-        $url = $this->base_url . "api/User/getListJob?per_page=".intval($per_page)."&page=".intval($page);
-        $resp = wp_remote_get($url, ['headers' => $this->default_headers(), 'timeout'=>20]);
-
-        if (is_wp_error($resp)) return ['error' => $resp->get_error_message()];
-
-        $code = wp_remote_retrieve_response_code($resp);
-        $data = json_decode(wp_remote_retrieve_body($resp), true);
-
-        if ($code !== 200) return ['error' => "HTTP $code", 'raw' => $data];
-
-        set_transient($cache_key, $data, $this->transient_ttl);
-        return $data;
+    if (empty($items) || !is_array($items)) {
+        return '<div class="wegestu-jobs-empty">'.esc_html__('Aucune offre trouvée.', 'wegestu-jobs').'</div>';
     }
 
-    public function get_job_by_id($id) {
-        $cache_key = "wegestu_job_{$id}";
-        $cached = get_transient($cache_key);
-        if ($cached !== false) return $cached;
+    $html = '<div class="wegestu-jobs-list">';
+    $html .= wegestu_jobs_render_list_items($items);
+    $html .= '</div>';
 
-        // try dedicated endpoint
-        $url = $this->base_url . "api/User/getJob?id=" . intval($id);
-        $resp = wp_remote_get($url, ['headers' => $this->default_headers(), 'timeout'=>20]);
-        if (is_wp_error($resp)) return ['error' => $resp->get_error_message()];
-
-        $code = wp_remote_retrieve_response_code($resp);
-        $data = json_decode(wp_remote_retrieve_body($resp), true);
-
-        if ($code === 200 && !isset($data['error'])) {
-            set_transient($cache_key, $data, $this->transient_ttl);
-            return $data;
-        }
-
-        // fallback search
-        $page = 1;
-        while($page <= 10){
-            $list = $this->get_jobs(50, $page);
-            if(isset($list['data']) && is_array($list['data'])){
-                foreach($list['data'] as $job){
-                    if((isset($job['id']) && intval($job['id']) === $id) || (isset($job['ID_job']) && intval($job['ID_job']) === $id)){
-                        set_transient($cache_key, $job, $this->transient_ttl);
-                        return $job;
-                    }
-                }
-            } else break;
-            $page++;
-        }
-
-        return ['error'=>'Job not found'];
+    $next_page = $response['data']['next_page_url'] ?? null;
+    if($next_page){
+        $html .= '<div class="wegestu-jobs-pagination">';
+        $html .= '<button class="wegestu-load-more" data-next="'.esc_url($next_page).'">'.esc_html__('Charger plus', 'wegestu-jobs').'</button>';
+        $html .= '</div>';
     }
 
-    private function default_headers() {
-        $h = [
-            'Accept' => 'application/json',
-            'User-Agent' => 'WegestuJobsWPPlugin/1.0',
-        ];
-        if(!empty($this->token)) $h['Authorization'] = 'Bearer '.$this->token;
-        return $h;
+    return $html;
+}
+
+function wegestu_jobs_render_list_items($items) {
+    if (empty($items) || !is_array($items)) {
+        return '<div class="wegestu-jobs-empty">'.esc_html__('Aucune offre trouvée.', 'wegestu-jobs').'</div>';
     }
+
+    $html = '';
+    foreach ($items as $job) {
+        $id       = intval($job['id'] ?? 0);
+        $title    = esc_html($job['name'] ?? $job['title'] ?? __('(Titre non défini)','wegestu-jobs'));
+        $company  = esc_html($job['esn_name'] ?? $job['company'] ?? '');
+        $location = esc_html($job['city'][0] ?? $job['location'] ?? '');
+        $desc     = wp_kses_post($job['description'] ?? '');
+
+        $apply_url = $id ? home_url('/offres/'. $id .'/') : '#';
+
+        $html .= '<article class="wegestu-job-item">';
+        $html .= '<h3>'.$title.'</h3>';
+        if($company)  $html .= '<div><strong>'.esc_html__('Entreprise: ','wegestu-jobs').'</strong>'.$company.'</div>';
+        if($location) $html .= '<div><strong>'.esc_html__('Lieu: ','wegestu-jobs').'</strong>'.$location.'</div>';
+        if($desc)     $html .= '<div class="wegestu-job-excerpt">'.wp_trim_words(wp_strip_all_tags($desc),30,'...').'</div>';
+        if($id)       $html .= '<a href="'.$apply_url.'">'.esc_html__('Voir le détail','wegestu-jobs').'</a>';
+        $html .= '</article>';
+    }
+
+    return $html;
+}
+
+function wegestu_jobs_render_detail($response) {
+    if (isset($response['error'])) {
+        return '<div class="wegestu-jobs-error">'.esc_html($response['error']).'</div>';
+    }
+
+    $job = $response['data'] ?? $response;
+
+    if (empty($job) || !is_array($job)) {
+        return '<div class="wegestu-jobs-empty">'.esc_html__('Offre introuvable.', 'wegestu-jobs').'</div>';
+    }
+
+    $id         = intval($job['id'] ?? 0);
+    $title      = esc_html($job['name'] ?? $job['title'] ?? '');
+    $company    = esc_html($job['esn_name'] ?? $job['company'] ?? '');
+    $location   = esc_html($job['city'][0] ?? $job['location'] ?? '');
+    $desc       = wp_kses_post($job['description'] ?? '');
+    $salary     = esc_html($job['salary'] ?? '');
+    $experience = esc_html($job['years_of_experience'] ?? '');
+    $skills     = !empty($job['skills']) ? implode(', ', $job['skills']) : '';
+    $date       = esc_html($job['created_at'] ?? '');
+    $apply_url  = $id ? home_url('/offres/'. $id .'/') : '#';
+
+    $html = '<div class="wegestu-job-detail">';
+    $html .= '<h2>'.$title.'</h2>';
+    if($company)    $html .= '<div><strong>'.esc_html__('Entreprise: ','wegestu-jobs').'</strong>'.$company.'</div>';
+    if($location)   $html .= '<div><strong>'.esc_html__('Lieu: ','wegestu-jobs').'</strong>'.$location.'</div>';
+    if($salary)     $html .= '<div><strong>'.esc_html__('Salaire: ','wegestu-jobs').'</strong>'.$salary.'</div>';
+    if($experience) $html .= '<div><strong>'.esc_html__('Expérience: ','wegestu-jobs').'</strong>'.$experience.' ans</div>';
+    if($skills)     $html .= '<div><strong>'.esc_html__('Compétences: ','wegestu-jobs').'</strong>'.$skills.'</div>';
+    if($date)       $html .= '<div><strong>'.esc_html__('Publié le: ','wegestu-jobs').'</strong>'.$date.'</div>';
+    if($desc)       $html .= '<div class="wegestu-job-description">'.wpautop($desc).'</div>';
+    $html .= '<div class="wegestu-job-apply"><a href="'.$apply_url.'">'.esc_html__('Postuler maintenant','wegestu-jobs').'</a></div>';
+    $html .= '</div>';
+
+    return $html;
 }
