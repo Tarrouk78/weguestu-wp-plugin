@@ -22,10 +22,10 @@ class Wegestu_Elementor_Loader {
         }
 
         // Si tu as un autre widget liste de jobs, tu peux le charger ici
-        // require_once WEGESTU_JOBS_DIR . 'inc/elementor/widget-wegestu-jobs.php';
-        // if ( class_exists( 'Wegestu_Widget_Jobs' ) ) {
-        //     $widgets_manager->register( new Wegestu_Widget_Jobs() );
-        // }
+         require_once WEGESTU_JOBS_DIR . 'inc/elementor/widget-wegestu-jobs.php';
+         if ( class_exists( 'Wegestu_Widget_Jobs' ) ) {
+              $widgets_manager->register( new Wegestu_Widget_Jobs() );
+           }
     }
 
     public static function enqueue_styles() {
